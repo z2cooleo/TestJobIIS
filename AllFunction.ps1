@@ -1,18 +1,4 @@
-<# ======================= Print ======================= #>
-function Print-Failed {
-	Param(
-		[Parameter(Mandatory=$True)]
-		$msg
-	)
-	PROCESS {
-		New-Variable -Name 'dt' -Option Private
 
-		$dt = Get-Date -Format "yyyy.MM.dd HH:mm:ss"
-		Write-Output "[$dt] FAILED: $msg"
-
-		Remove-Variable -Name 'dt'
-	}
-}
 function Exit-AfterError {
 	Param(
 		[Parameter(Mandatory=$True)]
@@ -24,34 +10,7 @@ function Exit-AfterError {
 	}
 }
 
-function Print-INFO {
-	Param(
-		[Parameter(Mandatory=$True)]
-		$msg
-	)
-	PROCESS {
-		New-Variable -Name 'dt' -Option Private
 
-		$dt = Get-Date -Format "yyyy.MM.dd HH:mm:ss"
-		write-output "[$dt] INFO: $msg"
-
-		Remove-Variable -Name 'dt'
-	}
-}
-function Print-PASSED {
-	Param(
-		[Parameter(Mandatory=$True)]
-		$msg
-	)
-	PROCESS {
-		New-Variable -Name 'dt' -Option Private
-
-		$dt = Get-Date -Format "yyyy.MM.dd HH:mm:ss"
-		Write-Output "[$dt] PASSED: $msg"
-
-		Remove-Variable -Name 'dt'
-	}
-}
 function wait {
 	Param (
 		[Parameter(Mandatory=$True)]
@@ -190,16 +149,44 @@ function install_dotNET {
 
 		[Parameter(Mandatory=$True)]
 		[Alias('path')]
-		[Array]$pathToFile
+		[String]$pathToFile
 	)
+	Begin{
+		New-Variable -Name file -Value [io.file]::ReadAllBytes($pathToFile)
+	}
 	PROCESS {
 		$var = Invoke-Command -Session $psSession -ScriptBlock { 
 			Get-ItemProperty -Path "hklm:SOFTWARE\Microsoft\NET Framework Setup\NDP\v4\Full" 
 		}
 		if($var.Release -ge 379893) {}
 		else{
-
-		}
+			$sriptBlock = {
+				Param(
+					[Parameter(Mandatory=$true)]
+					[io.file]$file
+				)
+				function Test-PendingReboot
+				{
+					if (Get-ChildItem "HKLM:\Software\Microsoft\Windows\CurrentVersion\Component Based Servicing\RebootPending" -EA Ignore) { return $true }
+					if (Get-Item "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\WindowsUpdate\Auto Update\RebootRequired" -EA Ignore) { return $true }
+					if (Get-ItemProperty "HKLM:\SYSTEM\CurrentControlSet\Control\Session Manager" -Name PendingFileRenameOperations -EA Ignore) { return $true }
+					try { 
+						$util = [wmiclass]"\\.\root\ccm\clientsdk:CCM_ClientUtilities"
+						$status = $util.DetermineIfRebootPending()
+						if(($status -ne $null) -and $status.RebootPending){ return $true }
+					}
+					catch{}					
+					return $false
+				}
+				[Io.file]::WriteAllBytes("%temp%\dotnet.exe", $file)
+				Unblock-File -LiteralPath "%temp%\dotnet.exe"
+				Start-Process -FilePath "%temp%\dotnet.exe" -ArgumentList "/norestart"
+				}				
+			$var = Invoke-Command -Session $psSession -ScriptBlock $sriptBlock -ArgumentList $file
+			if([string]$var -eq "True"){
+				Restart-Computer -ComputerName $psSession.ComputerName -Credential $psSession -Wait -For PowerShell -Timeout 300 -Delay 2 -Force 
+			}	
+		}		
     }
 }
 function Check-Existence_IIS_Role {
@@ -345,70 +332,64 @@ function Attach-SiteToPool {
         
     }
 }
-function Check-NeedUpdateFromGit {
+function Check-IsNeedUpdate {
 	[CmdletBinding()]
 	Param (
 		[Parameter(Mandatory=$True)]
-		[System.Management.Automation.Runspaces.PSSession]$psSession,
+		[alias("Path")]
+		[string]$strPathToZipFile,
 
 		[Parameter(Mandatory=$True)]
-		[string]$strPathToTestedBuild,
-
-		[Parameter(Mandatory=$True)]
-		[string]$strComponents
+		[alias("PathToDB")]
+		[string]$PathtoStorageDB
 	)
-    BEGIN {
-
-    }
-	PROCESS {
-
-    }
-    END {
-        
+    PROCESS {
+		if(Test-Path -Path $PathtoStorageDB){
+			$hashOldSite = Import-Clixml -Path $PathtoStorageDB
+			Remove-Item -Path $PathtoStorageDB
+		}
+		else {
+			$hashOldSite = @{}
+		}		
+		$hashNewSite = Get-FileHash -Path $strPathToZipFile -Algorithm SHA256
+		if($hashOldSite -eq $hashNewSite) {
+			$hashNewSite | Export-Clixml -Path $PathtoStorageDB
+			return $false
+		}
+		else{
+			$hashNewSite | Export-Clixml -Path $PathtoStorageDB
+			return $true			
+		}
     }
 }
-function Set-SiteFromGit {
+
+function Install-Site {
 	[CmdletBinding()]
 	Param (
 		[Parameter(Mandatory=$True)]
 		[System.Management.Automation.Runspaces.PSSession]$psSession,
 
 		[Parameter(Mandatory=$True)]
-		[string]$strPathToTestedBuild,
+		[string]$strPathToFileSite,
 
 		[Parameter(Mandatory=$True)]
-		[string]$strComponents
+		[string]$strPathToSitePlace
 	)
-    BEGIN {
-
-    }
 	PROCESS {
-
-    }
-    END {
-        
-    }
-}
-function Set-RightToSite {
-	[CmdletBinding()]
-	Param (
-		[Parameter(Mandatory=$True)]
-		[System.Management.Automation.Runspaces.PSSession]$psSession,
-
-		[Parameter(Mandatory=$True)]
-		[string]$strPathToTestedBuild,
-
-		[Parameter(Mandatory=$True)]
-		[string]$strComponents
-	)
-    BEGIN {
-
-    }
-	PROCESS {
-
-    }
-    END {
-        
+		New-Variable -Name file -Value [io.file]::ReadAllBytes($strPathToFileSite)
+		$sriptBlock = {
+			Param(
+				[Parameter(Mandatory=$true)]
+				[io.file]$file
+			)
+			[Io.file]::WriteAllBytes("$strPathToSitePlace\master.zip", $file)
+			Get-ChildItem "$strPathToSitePlace\master.zip" | Expand-Archive -DestinationPath $strPathToSitePlace
+			$acl = Get-Acl $strPathToSitePlace
+			$a = "IIS","FullControl","Allow"
+			$accessRule = New-Object System.Security.AccessControl.FileSystemAccessRule($a)
+			$acl.SetAccessRule($accessRule)
+			$acl | Set-Acl $strPathToSitePlace
+		}
     }
 }
 function Check-IsRun_IIS {
@@ -453,27 +434,5 @@ function Run-IIS_Server {
     }
     END {
         
-    }
-}
-function Check-IsRunSite {
-	[CmdletBinding()]
-	Param (
-		[Parameter(Mandatory=$True)]
-		[System.Management.Automation.Runspaces.PSSession]$psSession,
-
-		[Parameter(Mandatory=$True)]
-		[string]$strPathToTestedBuild,
-
-		[Parameter(Mandatory=$True)]
-		[string]$strComponents
-    )
-    BEGIN {
-
-    }
-	PROCESS {
-
-    }
-    END {
-
     }
 }
