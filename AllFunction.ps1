@@ -1,4 +1,3 @@
-
 function Exit-AfterError {
 	Param(
 		[Parameter(Mandatory=$True)]
@@ -9,7 +8,6 @@ function Exit-AfterError {
 		throw "$ST_AUTOTEST_ERROR_EXCEPTION $msg"
 	}
 }
-
 
 function wait {
 	Param (
@@ -27,10 +25,11 @@ function initialRemotePsSessionConfig {
 		[Parameter(Mandatory=$True)]
 		[System.Management.Automation.Runspaces.PSSession]$psSession
 	)
-	PROCESS {
+	Begin{
 		Write-Debug ($MyInvocation.MyCommand.Name + ': FINISH')
         Set-Variable -Name 'psSession' -Option ReadOnly,Private
-
+	}
+	PROCESS {
 		invoke-command -Session $psSession `
 			-scriptBlock `
 			{
@@ -63,7 +62,7 @@ function CreateRemotePsSession{
 		[Parameter(Mandatory=$True)]
 		[string]$outVarNameForSession
 	)
-	PROCESS {
+	Begin{
 		Print-INFO "CreateRemotePsSession: start"
         Set-Variable -Name 'vmName' -Option ReadOnly,Private
         Set-Variable -Name 'vmUser' -Option ReadOnly,Private
@@ -74,6 +73,8 @@ function CreateRemotePsSession{
 		New-Variable -Name 'cred' -Option Private
 		New-Variable -Name 'i' -Option Private
 		New-Variable -Name 'session' -Option Private
+	}
+	PROCESS {
 
 		$pw = ConvertTo-SecureString -AsPlainText -Force -String $vmPass
 		$cred = new-object -typeName System.Management.Automation.PSCredential -argumentList $vmUser,$pw
@@ -84,12 +85,6 @@ function CreateRemotePsSession{
 				[System.Management.Automation.Runspaces.PSSession]$session = 
 							 New-PSSession -ComputerName $vmName -Credential $cred
 			} 
-			catch [NetworkPathNotFound]{################
-				Write-Host "213"
-			}
-			catch [LogonFailure]{
-				Write-Host "213"
-			}
 			catch {
 				Print-INFO "Attempt number '$i' is failure"
 			}
@@ -100,16 +95,23 @@ function CreateRemotePsSession{
 				Exit-AfterError "PowerShell remote connection with '$vmName' is not established `
 					after '$p_quantityOfRemotePsConnectionAttempts' attempts."
 			}
-
 			wait 10
 			$i++
 		} while ($true)
-		Print-INFO "Remote connection with '$vmName' comp is established"
-		
+		Print-INFO "Remote connection with '$vmName' comp is established"		
 		initialRemotePsSessionConfig -psSession $session
-
 		Set-Variable -Name $outVarNameForSession -Value $session -Scope 1
 		Print-INFO "$MyInvocation.MyCommand.Name + ': finish'"
+	}
+	end{
+		Remove-Variable -Name 'vmName'
+        Remove-Variable -Name 'vmUser'
+        Remove-Variable -Name 'vmPass'
+
+		Remove-Variable -Name 'pw'
+		Remove-Variable -Name 'cred'
+		Remove-Variable -Name 'i'
+		Remove-Variable -Name 'session'
 	}
 }
 function install_IIS_Role {
@@ -310,28 +312,6 @@ function Add-IIS_site {
 		} -ArgumentList $webSiteName
     }
 }
-function Attach-SiteToPool {
-	[CmdletBinding()]
-	Param (
-		[Parameter(Mandatory=$True)]
-		[System.Management.Automation.Runspaces.PSSession]$psSession,
-
-		[Parameter(Mandatory=$True)]
-		[string]$strPathToTestedBuild,
-
-		[Parameter(Mandatory=$True)]
-		[string]$strComponents
-	)
-    BEGIN {
-
-    }
-	PROCESS {
-
-    }
-    END {
-        
-    }
-}
 function Check-IsNeedUpdate {
 	[CmdletBinding()]
 	Param (
@@ -390,6 +370,7 @@ function Install-Site {
 			$acl.SetAccessRule($accessRule)
 			$acl | Set-Acl $strPathToSitePlace
 		}
+		Invoke-Command -Session $psSession -ScriptBlock $sriptBlock -ArgumentList $file
     }
 }
 function Check-IsRun_IIS {

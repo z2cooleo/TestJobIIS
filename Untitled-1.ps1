@@ -60,18 +60,16 @@ Invoke-WebRequest -Uri https://github.com/TargetProcess/DevOpsTaskJunior/archive
 $isNeedUpgrade = Check-IsNeedUpdate -path "$pathToFile\master.zip" -pathToDB "$pathToFile\hash.zip"
 
 #install site to VM
-
+if($isNeedUpgrade) {
+	Install-Site -psSession $psSession -strPathToFileSite "c:\inetpub\wwwroot" -strPathToSitePlace "c:\inetpub\wwwroot"
+}
 
 # Check Site
 $siteName = "192.168.74.6:82"
 $stat = Invoke-WebRequest $siteName
 
 # Send report
-if($stat.StatusCode -eq 200){
-	curl -X POST -H 'Content-type: application/json' --data '{"text":"Hello, World!"}' https://hooks.slack.com/services/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
-}
-else{
+curl -X POST -H 'Content-type: application/json' --data '{"text":"Hello, World!"}' https://hooks.slack.com/services/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
 
-}
 
 # Get the work of my dreams :)
