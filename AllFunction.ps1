@@ -1,13 +1,4 @@
-function Exit-AfterError {
-	Param(
-		[Parameter(Mandatory=$True)]
-		$msg
-	)
-	PROCESS{
-		Print-Failed $msg
-		throw "$ST_AUTOTEST_ERROR_EXCEPTION $msg"
-	}
-}
+
 
 function wait {
 	Param (
@@ -104,14 +95,14 @@ function CreateRemotePsSession{
 		Print-INFO "$MyInvocation.MyCommand.Name + ': finish'"
 	}
 	end{
-		Remove-Variable -Name 'vmName'
-        Remove-Variable -Name 'vmUser'
-        Remove-Variable -Name 'vmPass'
+		Remove-Variable -Name 'vmName' -force
+        Remove-Variable -Name 'vmUser' -force
+        Remove-Variable -Name 'vmPass' -force
 
-		Remove-Variable -Name 'pw'
-		Remove-Variable -Name 'cred'
-		Remove-Variable -Name 'i'
-		Remove-Variable -Name 'session'
+		Remove-Variable -Name 'pw' -force
+		Remove-Variable -Name 'cred' -force
+		Remove-Variable -Name 'i' -force
+		Remove-Variable -Name 'session' -force
 	}
 }
 function install_IIS_Role {
@@ -124,6 +115,7 @@ function install_IIS_Role {
 		[Array]$arrayListRole
 	)
 	PROCESS {
+		Print-INFO "installing the necessary windows components"
 		$listRole = Invoke-Command -Session $psSession -ScriptBlock { Get-WindowsFeature -Name web* }
 		$listForInstall = @()
 		foreach($item in $arrayListRole)
@@ -136,6 +128,7 @@ function install_IIS_Role {
 		}
 		foreach($i in $listForInstall)
 		{
+			Print-INFO "installing $i"
 			$resultInstallRole = Invoke-Command -Session $psSession -ScriptBlock { 
 				Param($roleName)
 				Add-WindowsFeature -Name $roleName
@@ -150,23 +143,52 @@ function install_dotNET {
 		[System.Management.Automation.Runspaces.PSSession]$psSession,
 
 		[Parameter(Mandatory=$True)]
-		[Alias('path')]
-		[String]$pathToFile
+		[Alias('path', 'pathToDotNetOfflineInstaller')]
+		[String]$pathToFile,
+
+		[Parameter(Mandatory=$True)]
+		[String]$pathdownloaded,
+
+		[Parameter(Mandatory=$True)]
+		[string]$vmUser,
+
+		[Parameter(Mandatory=$True)]
+		[string]$vmPass,
+
+		[Parameter(Mandatory=$True)]
+		[String]$link
 	)
 	Begin{
-		New-Variable -Name file -Value [io.file]::ReadAllBytes($pathToFile)
+		New-Variable -Name file 
+		try{
+			invoke-webrequest $link -DisableKeepAlive -UseBasicParsing -Method head
+		}
+		catch{
+			Exit-AfterError $_
+		}
 	}
 	PROCESS {
+		Print-INFO "Check for updating .Net"
 		$var = Invoke-Command -Session $psSession -ScriptBlock { 
 			Get-ItemProperty -Path "hklm:SOFTWARE\Microsoft\NET Framework Setup\NDP\v4\Full" 
 		}
-		if($var.Release -ge 379893) {}
+		if($var.Release -ge 379893) {
+			Print-INFO "Updating .Net is not requred"
+		}
 		else{
-			$sriptBlock = {
+			Print-INFO "Updating .Net requred"
+			$sriptBlockInstall = {
 				Param(
 					[Parameter(Mandatory=$true)]
-					[io.file]$file
-				)
+					[string]$link,
+					[Parameter(Mandatory=$true)]
+					[string]$pathdownloaded
+				)						
+				Invoke-WebRequest -Uri $link -OutFile $pathdownloaded
+				Start-Process -FilePath $pathdownloaded -ArgumentList "/q /norestart /SkipMSUInstall /log c:\tmp\txt.txt" -Wait				
+				Remove-Item -Path $pathdownloaded
+			}	
+			$scriptblockCheckRebootPending = {
 				function Test-PendingReboot
 				{
 					if (Get-ChildItem "HKLM:\Software\Microsoft\Windows\CurrentVersion\Component Based Servicing\RebootPending" -EA Ignore) { return $true }
@@ -180,44 +202,33 @@ function install_dotNET {
 					catch{}					
 					return $false
 				}
-				[Io.file]::WriteAllBytes("%temp%\dotnet.exe", $file)
-				Unblock-File -LiteralPath "%temp%\dotnet.exe"
-				Start-Process -FilePath "%temp%\dotnet.exe" -ArgumentList "/norestart"
-				}				
-			$var = Invoke-Command -Session $psSession -ScriptBlock $sriptBlock -ArgumentList $file
-			if([string]$var -eq "True"){
-				Restart-Computer -ComputerName $psSession.ComputerName -Credential $psSession -Wait -For PowerShell -Timeout 300 -Delay 2 -Force 
-			}	
+				Test-PendingReboot
+			}
+			try{
+				$var = Invoke-Command -Session $psSession -ScriptBlock $scriptblockCheckRebootPending		
+				if([string]$var -eq "True"){ #todo
+					New-Variable -Name 'pw' -Option Private
+					$pw = ConvertTo-SecureString -AsPlainText -Force -String $vmPass
+					$cred = new-object -typeName System.Management.Automation.PSCredential -argumentList $vmUser,$pw
+					Restart-Computer -ComputerName $psSession.ComputerName -Credential $cred -Wait -For PowerShell -Timeout 300 -Delay 2 -Force 
+				}	
+				Invoke-Command -Session $psSession -ScriptBlock $sriptBlockInstall -ArgumentList $link, $pathdownloaded
+				$var = Invoke-Command -Session $psSession -ScriptBlock $scriptblockCheckRebootPending			
+				if([string]$var -eq "True"){
+					New-Variable -Name 'pw' -Option Private
+					$pw = ConvertTo-SecureString -AsPlainText -Force -String $vmPass
+					$cred = new-object -typeName System.Management.Automation.PSCredential -argumentList $vmUser,$pw
+					Restart-Computer -ComputerName $psSession.ComputerName -Credential $cred -Wait -For PowerShell -Timeout 300 -Delay 2 -Force 
+				}
+			}
+			catch{
+				Exit-AfterError $_
+			}
 		}		
-    }
-}
-function Check-Existence_IIS_Role {
-	[CmdletBinding()]
-	Param (
-		[Parameter(Mandatory=$True)]
-		[System.Management.Automation.Runspaces.PSSession]$psSession,
-
-		[Parameter(Mandatory=$True)]
-		[string]$strProcessName,
-
-		[Parameter(Mandatory=$True)]
-		[bool]$boolExpectedExistenceState,
-
-		[Parameter(Mandatory=$True)]
-		[int]$intTimeoutInSeconds,
-
-		[Parameter(Mandatory=$false)]
-		[string]$strAddOnFailMsg = ' '
-	)
-    BEGIN {
-
-    }
-	PROCESS {
-
-    }
-    END {
-        
-    }
+	}
+	End{
+		Remove-Variable -Name file
+	}
 }
 function Get-Existence_IIS_pool {
 	[CmdletBinding()]
