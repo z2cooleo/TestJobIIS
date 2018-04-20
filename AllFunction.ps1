@@ -78,6 +78,7 @@ function CreateRemotePsSession{
 			} 
 			catch {
 				Print-INFO "Attempt number '$i' is failure"
+				Print-INFO error[0]			
 			}
 			if ($session -ne $null) {
 				break
@@ -126,6 +127,7 @@ function install_IIS_Role {
 				$listForInstall += $item
 			}
 		}
+		Print-INFO "Components for installation: $listForInstall"
 		foreach($i in $listForInstall)
 		{
 			Print-INFO "installing $i"
@@ -230,7 +232,38 @@ function install_dotNET {
 		Remove-Variable -Name file
 	}
 }
-function Get-Existence_IIS_pool {
+function New-StepVar {
+	[CmdletBinding()]
+	Param (
+		[Parameter(Mandatory=$True)]
+		[string]$Name,
+
+		[Parameter(Mandatory=$false)]
+		$Value,
+
+		[Parameter(Mandatory=$false)]
+		[int]$Scope = 2
+	)
+	PROCESS {
+		Set-Variable -Name 'Name' -Option Private,ReadOnly
+		Set-Variable -Name 'Value' -Option Private,ReadOnly
+		Set-Variable -Name 'Scope' -Option Private,ReadOnly
+		Set-Variable -Name 'Option' -Option Private,ReadOnly
+
+		if (Get-Variable -Name $Name -Scope $Scope -ErrorAction SilentlyContinue) {
+			# $true # Variable is present
+			Clear-Variable -Name $Name -Scope $Scope
+		} else {
+			# $false # Variable is absent
+			New-Variable -Name $Name -Option Private -Scope $Scope
+		}
+
+		if ($Value -ne $null) {
+			Set-Variable -Name $Name -Value $Value -Scope $Scope
+		}
+	}
+ }
+function Check-Existence_IIS_pool {
 	[CmdletBinding()]
 	Param (
 		[Parameter(Mandatory=$True)]
@@ -238,26 +271,32 @@ function Get-Existence_IIS_pool {
 
 		[Parameter(Mandatory=$True)]
 		[string]$webPoolName,
-		
-		[Parameter(Mandatory=$false)]
-		$outListpool,
 
-		[Parameter(Mandatory=$false)]
-		$isNeedSetPool
+		[Parameter(Mandatory=$False)]
+		$outBool
 	)
 	PROCESS {
+		Print-INFO "Get current exist POOL"		
+
 		$listPool = Invoke-Command -Session $psSession -ScriptBlock { 
 			Param($webPoolName)
 			Import-Module WebAdministration
 			Get-ChildItem -Path "IIS:\AppPools"
 		} -ArgumentList $webPoolName
-
-		if([string]::IsNullOrEmpty($listPool)) { 
-			$True
+		Print-INFO $listPool.name
+		if([string]::IsNullOrEmpty($listPool) ) { 
+			Print-INFO "List of pool is NULL"
+			New-StepVar -Name $outBool -Value $True # Requared set pool
 		}
-		else{ 
+		elseif(!($listPool.name -contains $webPoolName)){ 
+			Print-INFO "List of pool is not contain $webPoolName"
 			Set-Variable -Name outListPool -Value $listPool -Scope global
-			$false
+			New-StepVar -Name $outBool -Value $True # Requared set pool
+		}
+		else{
+			Print-INFO "List of pool is contain $webPoolName"
+			Set-Variable -Name outListPool -Value $listPool -Scope global
+			New-StepVar -Name $outBool -Value $False
 		}		
     }
 }
@@ -272,6 +311,7 @@ function Set-IIS_pool {
 		[string]$webPoolName
 	)
 	PROCESS {
+		Print-Info "Set Pool: $webPoolName"
 		Invoke-Command -Session $psSession -ScriptBlock {
 			Param($webPoolName)
 			New-WebAppPool -name $webPoolName -force
@@ -291,19 +331,25 @@ function Get-IIS_site {
 		$outListSite,
 
 		[Parameter(Mandatory=$false)]
-		$isNeedSetSite
+		$outBool
 	)
 	PROCESS {
+		Print-INFO "Check current site"
 		$listSite = Invoke-Command -Session $psSession -ScriptBlock {
 			Get-ChildItem -Path IIS:\Sites
 		}
+		Print-INFO "Exist site: $listSite.name"
 
 		if([string]::IsNullOrEmpty($listSite)) { 
-			$True
+			New-StepVar -Name $outBool -Value $True # Requared set the Site
+		}
+		elseif($listSite -notcontains $webSiteName){
+			Set-Variable -Name outListSite -Value $listSite -Scope global
+			New-StepVar -Name $outBool -Value $True # Requared set the Site
 		}
 		else { 
 			Set-Variable -Name outListSite -Value $listSite -Scope global
-			$false
+			New-StepVar -Name $outBool -Value $false
 		}		
     }
 }
@@ -314,13 +360,24 @@ function Add-IIS_site {
 		[System.Management.Automation.Runspaces.PSSession]$psSession,
 
 		[Parameter(Mandatory=$True)]
-		[string]$webSiteName
+		[string]$pathLocateSite,
+
+		[Parameter(Mandatory=$True)]
+		[string]$webSiteName,
+		
+		[Parameter(Mandatory=$True)]
+		[string]$port,
+
+		[Parameter(Mandatory=$True)]
+		[string]$poolName		
 	)
 	PROCESS {
+		Print-INFO "Add site to IIS"
+
 		Invoke-Command -Session $psSession -ScriptBlock {
-			Param($webSiteName)
-			New-WebSite -Name $webSiteName -ApplicationPool "WebAppPool" -Port 82 -PhysicalPath "C:\inetpub\wwwroot"
-		} -ArgumentList $webSiteName
+			Param($webSiteName, $pathLocateSite, $port, $poolName)
+			New-WebSite -Name $webSiteName -ApplicationPool $poolName -Port $port -PhysicalPath $pathLocateSite
+		} -ArgumentList $webSiteName, $pathLocateSite, $port, $poolName
     }
 }
 function Check-IsNeedUpdate {

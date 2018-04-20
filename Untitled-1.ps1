@@ -26,6 +26,7 @@ try{
 		-Description 'Quantity of attempts to connect to remote VM via PS session'
 	New-Variable -Name 'pathToDotNetOfflineInstaller' -Value "$pathToFiles\NDP452.exe" -Option Constant
 	New-Variable -Name 'pathLocateSite' -Value "C:\inetpub\wwwroot" -Option Constant
+	New-Variable -Name 'port' -Value 80 -Option Constant
 	New-Variable -Name 'LinkForDownloadDotNetInstaller' -Value  "https://download.microsoft.com/download/3/5/9/35980F81-60F4-4DE3-88FC-8F962B97253B/NDP461-KB3102438-Web.exe"
 }
 catch{}
@@ -43,23 +44,19 @@ createRemotePsSession -vmName $VMToRun -vmUser $VMUser -vmPass $VMPass `
 # Install Role IIS
 [Array]$roleList = @("Web-Server", "web-mgmt-console", "Web-ASP", "Web-Asp-Net45")
 install_IIS_Role -psSession $psSession -arrayListRole $roleList
-# Install .Net 4.5.2
-install_dotNET -psSession $psSession -path $pathToDotNetOfflineInstaller -pathdownloaded "c:\tmp\1.exe" `
- -Link $LinkForDownloadDotNetInstaller -vmUser $VMUser -vmPass $VMPass
 # Set pool for IIS
-if(Get-Existence_IIS_pool -psSession $psSession -webPoolName "WebAppPool"){
+Check-Existence_IIS_pool -psSession $psSession -webPoolName "WebAppPool" -outBool "boolIsNeedSetPool"
+if($boolIsNeedSetPool){
 	Set-IIS_pool -psSession $psSession -webPoolName "WebAppPool" 
 }
 elseif([array]::indexof($outListPool.name, "WebAppPool") -eq -1 ){
 	Set-IIS_pool -psSession $psSession -webPoolName "WebAppPool" 
 }
 # Set Site into pool
-if(Get-IIS_site -psSession $psSession -webSiteName "WebAppSite")
+Get-IIS_site -psSession $psSession -webSiteName "WebAppSite" -outBool "boolIsNeedSetSite"
+if($boolIsNeedSetSite)
 {
 	Add-IIS_site -psSession $psSession -webSiteName "WebAppSite" 
-}
-elseif([array]::indexof($outListSite.name, "WebAppSite") -eq -1 ){
-	Add-IIS_site -psSession $psSession -webSiteName "WebAppSite"
 }
 # Download site from GitHub
 [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
