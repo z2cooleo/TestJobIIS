@@ -66,7 +66,6 @@ function CreateRemotePsSession{
 		New-Variable -Name 'session' -Option Private
 	}
 	PROCESS {
-
 		$pw = ConvertTo-SecureString -AsPlainText -Force -String $vmPass
 		$cred = new-object -typeName System.Management.Automation.PSCredential -argumentList $vmUser,$pw
 		[int]$i = 1
@@ -78,7 +77,7 @@ function CreateRemotePsSession{
 			} 
 			catch {
 				Print-INFO "Attempt number '$i' is failure"
-				Print-INFO error[0]			
+				Print-INFO "$_.Exception.Message"		
 			}
 			if ($session -ne $null) {
 				break
@@ -248,7 +247,6 @@ function New-StepVar {
 		Set-Variable -Name 'Name' -Option Private,ReadOnly
 		Set-Variable -Name 'Value' -Option Private,ReadOnly
 		Set-Variable -Name 'Scope' -Option Private,ReadOnly
-		Set-Variable -Name 'Option' -Option Private,ReadOnly
 
 		if (Get-Variable -Name $Name -Scope $Scope -ErrorAction SilentlyContinue) {
 			# $true # Variable is present
@@ -338,12 +336,13 @@ function Get-IIS_site {
 		$listSite = Invoke-Command -Session $psSession -ScriptBlock {
 			Get-ChildItem -Path IIS:\Sites
 		}
-		Print-INFO "Exist site: $listSite.name"
+		Print-INFO "Exist site:" 
+		Print-INFO $listSite.name
 
 		if([string]::IsNullOrEmpty($listSite)) { 
 			New-StepVar -Name $outBool -Value $True # Requared set the Site
 		}
-		elseif($listSite -notcontains $webSiteName){
+		elseif($listSite.name -notcontains $webSiteName){
 			Set-Variable -Name outListSite -Value $listSite -Scope global
 			New-StepVar -Name $outBool -Value $True # Requared set the Site
 		}
@@ -376,8 +375,17 @@ function Add-IIS_site {
 
 		Invoke-Command -Session $psSession -ScriptBlock {
 			Param($webSiteName, $pathLocateSite, $port, $poolName)
-			New-WebSite -Name $webSiteName -ApplicationPool $poolName -Port $port -PhysicalPath $pathLocateSite
+			New-WebSite -Name $webSiteName -ApplicationPool $poolName -Port $port -PhysicalPath "$pathLocateSite\DevOpsTaskJunior-master"
 		} -ArgumentList $webSiteName, $pathLocateSite, $port, $poolName
+
+		Print-INFO "Start site"
+
+		$res = Invoke-Command -Session $psSession -ScriptBlock {
+			Param($webSiteName)
+			Remove-Website-Website -Name "Default Web Site"
+			Start-WebSite -Name $webSiteName 
+		} -ArgumentList $webSiteName
+		$res
     }
 }
 function Check-IsNeedUpdate {
@@ -389,7 +397,10 @@ function Check-IsNeedUpdate {
 
 		[Parameter(Mandatory=$True)]
 		[alias("PathToDB")]
-		[string]$PathtoStorageDB
+		[string]$PathtoStorageDB,
+
+		[Parameter(Mandatory=$True)]
+		$outIsNeedUpgrade
 	)
     PROCESS {
 		if(Test-Path -Path $PathtoStorageDB){
@@ -400,13 +411,13 @@ function Check-IsNeedUpdate {
 			$hashOldSite = @{}
 		}		
 		$hashNewSite = Get-FileHash -Path $strPathToZipFile -Algorithm SHA256
-		if($hashOldSite -eq $hashNewSite) {
+		if($hashOldSite.Hash -eq $hashNewSite.Hash) {
 			$hashNewSite | Export-Clixml -Path $PathtoStorageDB
-			return $false
+			New-StepVar -Name $outIsNeedUpgrade -Value $false
 		}
 		else{
 			$hashNewSite | Export-Clixml -Path $PathtoStorageDB
-			return $true			
+			New-StepVar -Name $outIsNeedUpgrade -Value $true			
 		}
     }
 }
@@ -418,27 +429,37 @@ function Install-Site {
 		[System.Management.Automation.Runspaces.PSSession]$psSession,
 
 		[Parameter(Mandatory=$True)]
-		[string]$strPathToFileSite,
+		[string]$strPathToLocalStorageFileSite,
 
 		[Parameter(Mandatory=$True)]
-		[string]$strPathToSitePlace
+		[string]$uri,
+
+		[Parameter(Mandatory=$True)]
+		[string]$strPathToRemotePCSitePlace
 	)
 	PROCESS {
-		New-Variable -Name file -Value [io.file]::ReadAllBytes($strPathToFileSite)
 		$sriptBlock = {
 			Param(
 				[Parameter(Mandatory=$true)]
-				[io.file]$file
+				[string]$uri,
+
+				[Parameter(Mandatory=$True)]
+				[string]$strPathToRemotePCSitePlace
 			)
-			[Io.file]::WriteAllBytes("$strPathToSitePlace\master.zip", $file)
-			Get-ChildItem "$strPathToSitePlace\master.zip" | Expand-Archive -DestinationPath $strPathToSitePlace
-			$acl = Get-Acl $strPathToSitePlace
+			Remove-Item "C:\inetpub\wwwroot\DevOpsTaskJunior-master" -Recurse
+
+			[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+			Invoke-WebRequest -Uri $uri -OutFile "$strPathToRemotePCSitePlace\master.zip"
+			Add-Type -assembly "system.io.compression.filesystem"
+			[System.IO.Compression.ZipFile]::ExtractToDirectory("$strPathToRemotePCSitePlace\master.zip", "$strPathToRemotePCSitePlace")
+
+			$acl = Get-Acl $strPathToRemotePCSitePlace
 			$a = "IIS","FullControl","Allow"
 			$accessRule = New-Object System.Security.AccessControl.FileSystemAccessRule($a)
 			$acl.SetAccessRule($accessRule)
-			$acl | Set-Acl $strPathToSitePlace
+			$acl | Set-Acl $strPathToRemotePCSitePlace
 		}
-		Invoke-Command -Session $psSession -ScriptBlock $sriptBlock -ArgumentList $file
+		Invoke-Command -Session $psSession -ScriptBlock $sriptBlock -ArgumentList $uri, $strPathToRemotePCSitePlace
     }
 }
 function Check-IsRun_IIS {

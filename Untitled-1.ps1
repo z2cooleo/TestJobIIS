@@ -15,21 +15,23 @@ Param (
 )
 
 $ErrorActionPreference = "Stop"
-try{
-	New-Variable -Name 'pathToRootOfProj' -Value ([string](Split-Path -Parent $PSCommandPath)) `
-		-Option Constant,AllScope -Description 'It is path to root of project'
-	New-Variable -Name 'pathToFiles' -Value "$pathToRootOfProj\Files" `
-		-Option Constant,AllScope -Description 'It is path to all of files of project'
-	New-Variable -Name 'pathToLog' -Value "$pathToRootOfProj\Log" `
-		-Option Constant,AllScope -Description 'It is path to all of files of project'
-	New-Variable -Name 'quantityOfRemotePsConnectionAttempts' -Value ([int]30) -Option Constant `
-		-Description 'Quantity of attempts to connect to remote VM via PS session'
-	New-Variable -Name 'pathToDotNetOfflineInstaller' -Value "$pathToFiles\NDP452.exe" -Option Constant
-	New-Variable -Name 'pathLocateSite' -Value "C:\inetpub\wwwroot" -Option Constant
-	New-Variable -Name 'port' -Value 80 -Option Constant
-	New-Variable -Name 'LinkForDownloadDotNetInstaller' -Value  "https://download.microsoft.com/download/3/5/9/35980F81-60F4-4DE3-88FC-8F962B97253B/NDP461-KB3102438-Web.exe"
-}
-catch{}
+
+New-Variable -Name 'pathToRootOfProj' -Value ([string](Split-Path -Parent $PSCommandPath)) `
+	-Option Constant,AllScope -Description 'It is path to root of project'
+New-Variable -Name 'pathToFiles' -Value "$pathToRootOfProj\Files" `
+	-Option Constant,AllScope -Description 'It is path to all of files of project'
+New-Variable -Name 'pathToLog' -Value "$pathToRootOfProj\Log" `
+	-Option Constant,AllScope -Description 'It is path to all of files of project'
+New-Variable -Name 'quantityOfRemotePsConnectionAttempts' -Value ([int]30) -Option Constant `
+	-Description 'Quantity of attempts to connect to remote VM via PS session'
+New-Variable -Name 'pathToDotNetOfflineInstaller' -Value "$pathToFiles\NDP452.exe" -Option Constant
+New-Variable -Name 'pathRemoteLocateSite' -Value "C:\inetpub\wwwroot" -Option Constant
+New-Variable -Name 'port' -Value 80 -Option Constant
+New-Variable -Name 'webPoolName' -Value "WebAppPool"
+New-Variable -Name 'webSiteName' -Value "MyWebApp"
+New-Variable -Name "GitHubUrlToSite" -Value "https://github.com/TargetProcess/DevOpsTaskJunior/archive/master.zip"
+New-Variable -Name 'LinkForDownloadDotNetInstaller' -Value  "https://download.microsoft.com/download/3/5/9/35980F81-60F4-4DE3-88FC-8F962B97253B/NDP461-KB3102438-Web.exe"
+
 
 . "$pathToRootOfProj\AllFunction.ps1"
 . "$pathToRootOfProj\Print.ps1"
@@ -45,33 +47,69 @@ createRemotePsSession -vmName $VMToRun -vmUser $VMUser -vmPass $VMPass `
 [Array]$roleList = @("Web-Server", "web-mgmt-console", "Web-ASP", "Web-Asp-Net45")
 install_IIS_Role -psSession $psSession -arrayListRole $roleList
 # Set pool for IIS
-Check-Existence_IIS_pool -psSession $psSession -webPoolName "WebAppPool" -outBool "boolIsNeedSetPool"
+Check-Existence_IIS_pool -psSession $psSession -webPoolName $webPoolName -outBool "boolIsNeedSetPool"
 if($boolIsNeedSetPool){
-	Set-IIS_pool -psSession $psSession -webPoolName "WebAppPool" 
+	Set-IIS_pool -psSession $psSession -webPoolName $webPoolName
 }
 elseif([array]::indexof($outListPool.name, "WebAppPool") -eq -1 ){
-	Set-IIS_pool -psSession $psSession -webPoolName "WebAppPool" 
+	Set-IIS_pool -psSession $psSession -webPoolName $webPoolName 
 }
 # Set Site into pool
-Get-IIS_site -psSession $psSession -webSiteName "WebAppSite" -outBool "boolIsNeedSetSite"
+Get-IIS_site -psSession $psSession -webSiteName $webSiteName -outBool "boolIsNeedSetSite"
 if($boolIsNeedSetSite)
 {
-	Add-IIS_site -psSession $psSession -webSiteName "WebAppSite" 
+	Add-IIS_site -psSession $psSession -webSiteName $webSiteName -port $port -pathLocateSite $pathLocateSite -poolName $webPoolName
 }
 # Download site from GitHub
+Remove-Item -Path "$pathToFiles\master.zip"
 [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
-Invoke-WebRequest -Uri https://github.com/TargetProcess/DevOpsTaskJunior/archive/master.zip -OutFile "$pathToFiles\master.zip"
-$isNeedUpgrade = Check-IsNeedUpdate -path "$pathToFiles\master.zip" -pathToDB "$pathToFiles\hash.zip"
+Invoke-WebRequest -Uri $GitHubUrlToSite -OutFile "$pathToFiles\master.zip"
+Check-IsNeedUpdate -path "$pathToFiles\master.zip" -pathToDB "$pathToFiles\hash.hs" -outIsNeedUpgrade "isNeedUpgrade"
 
 #install site to VM
 if($isNeedUpgrade) {
-	Install-Site -psSession $psSession -strPathToFileSite "c:\inetpub\wwwroot" -strPathToSitePlace "c:\inetpub\wwwroot"
+	Install-Site -psSession $psSession -uri $GitHubUrlToSite -strPathToLocalStorageFileSite "$pathToFiles\master.zip" `
+			 -strPathToRemotePCSitePlace $pathRemoteLocateSite
 }
 
 # Check Site
-$siteName = "192.168.74.6:82"
-$stat = Invoke-WebRequest $siteName
+try{
+	$stat = Invoke-WebRequest $VMToRun
+}
+Catch{
+	Print-Failed "$_.Exception.Message"
+}
 
 # Send report
-curl -X POST -H 'Content-type: application/json' --data '{"text":"Hello, World!"}' https://hooks.slack.com/services/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
+if($stat.StatusCode -eq 200){
+	$hookUri = "https://hooks.slack.com/services/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"
 
+	$payload = @{
+		"text" = "200 OK"		
+	}	
+	Invoke-WebRequest -Method POST -Body (ConvertTo-Json -Compress -InputObject $payload) -UseBasicParsing -Uri $hookUri | Out-Null
+	$payload = @{
+		"text" = " GitHub - https://github.com/z2cooleo/TestJobIIS/archive/master.zip"		
+	}	
+	Invoke-WebRequest -Method POST -Body (ConvertTo-Json -Compress -InputObject $payload) -UseBasicParsing -Uri $hookUri | Out-Null 
+	$payload = @{
+		"text" = " eMail: Z2.cooleo@gmail.com"		
+	}	
+	Invoke-WebRequest -Method POST -Body (ConvertTo-Json -Compress -InputObject $payload) -UseBasicParsing -Uri $hookUri | Out-Null 
+	$payload = @{
+		"text" = " Creator: Makhortov Denis"		
+	}	
+	Invoke-WebRequest -Method POST -Body (ConvertTo-Json -Compress -InputObject $payload) -UseBasicParsing -Uri $hookUri | Out-Null
+}
+
+Remove-Variable -Name 'pathToRootOfProj' 
+Remove-Variable -Name 'pathToFiles' 
+Remove-Variable -Name 'pathToLog' 
+Remove-Variable -Name 'quantityOfRemotePsConnectionAttempts' 
+Remove-Variable -Name 'pathToDotNetOfflineInstaller' 
+Remove-Variable -Name 'pathRemoteLocateSite'
+Remove-Variable -Name 'port' 
+Remove-Variable -Name 'webPoolName'
+Remove-Variable -Name 'webSiteName'
+Remove-Variable -Name "GitHubUrlToSite" 
+Remove-Variable -Name 'LinkForDownloadDotNetInstaller'
