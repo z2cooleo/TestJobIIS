@@ -24,7 +24,6 @@ New-Variable -Name 'pathToLog' -Value "$pathToRootOfProj\Log" `
 	-Option Constant,AllScope -Description 'It is path to all of files of project'
 New-Variable -Name 'quantityOfRemotePsConnectionAttempts' -Value ([int]30) -Option Constant `
 	-Description 'Quantity of attempts to connect to remote VM via PS session'
-New-Variable -Name 'pathToDotNetOfflineInstaller' -Value "$pathToFiles\NDP452.exe" -Option Constant
 New-Variable -Name 'pathRemoteLocateSite' -Value "C:\inetpub\wwwroot" -Option Constant
 New-Variable -Name 'port' -Value 80 -Option Constant
 New-Variable -Name 'webPoolName' -Value "WebAppPool"
@@ -58,10 +57,12 @@ elseif([array]::indexof($outListPool.name, "WebAppPool") -eq -1 ){
 Get-IIS_site -psSession $psSession -webSiteName $webSiteName -outBool "boolIsNeedSetSite"
 if($boolIsNeedSetSite)
 {
-	Add-IIS_site -psSession $psSession -webSiteName $webSiteName -port $port -pathLocateSite $pathLocateSite -poolName $webPoolName
+	Add-IIS_site -psSession $psSession -webSiteName $webSiteName -port $port -pathLocateSite $pathRemoteLocateSite -poolName $webPoolName
 }
 # Download site from GitHub
-Remove-Item -Path "$pathToFiles\master.zip"
+if(Test-Path -Path "$pathToFiles\master.zip"){
+	Remove-Item -Path "$pathToFiles\master.zip"
+}
 [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
 Invoke-WebRequest -Uri $GitHubUrlToSite -OutFile "$pathToFiles\master.zip"
 Check-IsNeedUpdate -path "$pathToFiles\master.zip" -pathToDB "$pathToFiles\hash.hs" -outIsNeedUpgrade "isNeedUpgrade"

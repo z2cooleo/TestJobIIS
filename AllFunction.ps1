@@ -382,10 +382,10 @@ function Add-IIS_site {
 
 		$res = Invoke-Command -Session $psSession -ScriptBlock {
 			Param($webSiteName)
-			Remove-Website-Website -Name "Default Web Site"
+			Remove-Website -Name "Default Web Site"
 			Start-WebSite -Name $webSiteName 
 		} -ArgumentList $webSiteName
-		$res
+		
     }
 }
 function Check-IsNeedUpdate {
@@ -452,12 +452,12 @@ function Install-Site {
 			Invoke-WebRequest -Uri $uri -OutFile "$strPathToRemotePCSitePlace\master.zip"
 			Add-Type -assembly "system.io.compression.filesystem"
 			[System.IO.Compression.ZipFile]::ExtractToDirectory("$strPathToRemotePCSitePlace\master.zip", "$strPathToRemotePCSitePlace")
-
+			<#
 			$acl = Get-Acl $strPathToRemotePCSitePlace
 			$a = "IIS","FullControl","Allow"
 			$accessRule = New-Object System.Security.AccessControl.FileSystemAccessRule($a)
 			$acl.SetAccessRule($accessRule)
-			$acl | Set-Acl $strPathToRemotePCSitePlace
+			$acl | Set-Acl $strPathToRemotePCSitePlace #>
 		}
 		Invoke-Command -Session $psSession -ScriptBlock $sriptBlock -ArgumentList $uri, $strPathToRemotePCSitePlace
     }
