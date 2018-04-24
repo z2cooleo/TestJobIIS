@@ -76,17 +76,13 @@ if($isNeedUpgrade) {
 # Check Site
 try{
 	$stat = Invoke-WebRequest $VMToRun
-}
-Catch{
-	Print-Failed "$_.Exception.Message"
-}
 
 # Send report
 if($stat.StatusCode -eq 200){
-	$hookUri = "https://hooks.slack.com/services/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"
+	$hookUri = "goo.gl/LWjuda"
 
 	$payload = @{
-		"text" = "200 OK"		
+		"text" = "!!!Success!!!"		
 	}	
 	Invoke-WebRequest -Method POST -Body (ConvertTo-Json -Compress -InputObject $payload) -UseBasicParsing -Uri $hookUri | Out-Null
 	$payload = @{
@@ -102,6 +98,11 @@ if($stat.StatusCode -eq 200){
 	}	
 	Invoke-WebRequest -Method POST -Body (ConvertTo-Json -Compress -InputObject $payload) -UseBasicParsing -Uri $hookUri | Out-Null
 }
+}
+Catch{
+	Print-Failed "$_.Exception.Message"
+}
+
 
 Remove-Variable -Name 'pathToRootOfProj' 
 Remove-Variable -Name 'pathToFiles' 
