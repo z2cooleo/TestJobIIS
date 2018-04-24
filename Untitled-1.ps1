@@ -76,10 +76,14 @@ if($isNeedUpgrade) {
 # Check Site
 try{
 	$stat = Invoke-WebRequest $VMToRun
+}
+Catch{
+	Print-Failed "$_.Exception.Message"
+}
 
 # Send report
 if($stat.StatusCode -eq 200){
-	$hookUri = "goo.gl/LWjuda"
+	$hookUri = "https://hooks.slack.com/services/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"
 
 	$payload = @{
 		"text" = "!!!Success!!!"		
@@ -98,20 +102,17 @@ if($stat.StatusCode -eq 200){
 	}	
 	Invoke-WebRequest -Method POST -Body (ConvertTo-Json -Compress -InputObject $payload) -UseBasicParsing -Uri $hookUri | Out-Null
 }
-}
-Catch{
-	Print-Failed "$_.Exception.Message"
-}
 
 
-Remove-Variable -Name 'pathToRootOfProj' 
-Remove-Variable -Name 'pathToFiles' 
-Remove-Variable -Name 'pathToLog' 
-Remove-Variable -Name 'quantityOfRemotePsConnectionAttempts' 
-Remove-Variable -Name 'pathToDotNetOfflineInstaller' 
-Remove-Variable -Name 'pathRemoteLocateSite'
-Remove-Variable -Name 'port' 
-Remove-Variable -Name 'webPoolName'
-Remove-Variable -Name 'webSiteName'
-Remove-Variable -Name "GitHubUrlToSite" 
-Remove-Variable -Name 'LinkForDownloadDotNetInstaller'
+
+Remove-Variable -Name 'pathToRootOfProj' -Force
+Remove-Variable -Name 'pathToFiles'  -Force
+Remove-Variable -Name 'pathToLog'  -Force
+Remove-Variable -Name 'quantityOfRemotePsConnectionAttempts'  -Force
+Remove-Variable -Name 'pathToDotNetOfflineInstaller'  -Force
+Remove-Variable -Name 'pathRemoteLocateSite' -Force
+Remove-Variable -Name 'port'  -Force
+Remove-Variable -Name 'webPoolName' -Force
+Remove-Variable -Name 'webSiteName' -Force
+Remove-Variable -Name "GitHubUrlToSite"  -Force
+Remove-Variable -Name 'LinkForDownloadDotNetInstaller' -Force
